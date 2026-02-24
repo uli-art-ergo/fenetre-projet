@@ -2,6 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Perception</title>
 <style>
   body{margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;}
@@ -23,7 +24,6 @@
   }
   #start.breath{
     animation: startBreath 6.5s ease-in-out infinite;
-    /* breath 很轻：别太明显 */
   }
   @keyframes startBreath{
     0%   { filter: brightness(1.00) contrast(1.00) saturate(1.00); }
@@ -38,7 +38,7 @@
   #endveil{
     position:fixed;inset:0;background:#000;
     opacity:0;pointer-events:none;
-    transition:opacity 12s ease; /* 慢慢暗化：12秒 */
+    transition:opacity 12s ease;
     z-index:20;
   }
   #endveil.breathe{
@@ -75,9 +75,9 @@
 
 <div id="hint">« entrer »</div>
 
-<audio id="inside" src="inside.mp3" loop></audio>
-<audio id="outside" src="outside.mp3" loop></audio>
-<audio id="noise"  src="noise.mp3"  loop></audio>
+<audio id="inside" src="inside.mp3" loop preload="auto"></audio>
+<audio id="outside" src="outside.mp3" loop preload="auto"></audio>
+<audio id="noise"  src="noise.mp3"  loop preload="auto"></audio>
 
 <script>
 const black=document.getElementById("black");
@@ -94,6 +94,7 @@ const outside=document.getElementById("outside");
 const noise=document.getElementById("noise");
 
 let state = "intro"; // intro | ready | entered | playing | ended
+let unlocked = false;
 
 function clamp(v){ return Math.max(0, Math.min(1, v)); }
 function fade(a,from,to,ms){
@@ -118,19 +119,46 @@ function resetVideos(){
 }
 
 function stopAllAudio(){
-  [inside,outside,noise].forEach(a=>{ try{a.pause();}catch(e){} a.currentTime=0; });
+  [inside,outside,noise].forEach(a=>{
+    try{ a.pause(); }catch(e){}
+    a.currentTime=0;
+  });
+}
+
+/* ✅ 手机端音频解锁：在“用户点击”里触发一次 play
+   outside/noise 触发时保持静音并立刻暂停，避免乱响 */
+async function unlockAudioOnce(){
+  if(unlocked) return;
+  unlocked = true;
+
+  // inside：允许正常播放（但我们仍在 enterWithInside 里开始）
+  // outside/noise：解锁但不发声
+  try{
+    outside.currentTime = 0;
+    outside.volume = 0.0;
+    await outside.play();
+    outside.pause();
+    outside.currentTime = 0;
+  }catch(e){}
+
+  try{
+    noise.currentTime = 0;
+    noise.volume = 0.0;
+    await noise.play();
+    noise.pause();
+    noise.currentTime = 0;
+  }catch(e){}
 }
 
 function showStart(){
   hideAllVisual();
-  // 取消结尾暗化层
+
   endveil.classList.remove("breathe");
   endveil.style.opacity = "0";
   endveil.style.setProperty("--veilBase", "0.35");
 
   start.style.display="block";
   start.style.opacity="0";
-  // 开始呼吸动画
   start.classList.add("breath");
 
   hint.style.display="block";
@@ -145,10 +173,8 @@ function startIntro(){
   resetVideos();
   stopAllAudio();
 
-  // 重置 start 呼吸（避免残留）
   start.classList.remove("breath");
 
-  // 黑屏短开场：1.2s
   black.style.transition="none";
   black.style.opacity="1";
   void black.offsetWidth;
@@ -160,26 +186,27 @@ function startIntro(){
 }
 
 async function enterWithInside(){
-  // 第一次点击：解锁音频 + inside 开始，但画面仍是 start
+  // 第一次点击：解锁音频 + inside 开始（手机必须）
+  await unlockAudioOnce();
+
+  inside.currentTime = 0;
   inside.volume = 0.45;
-  outside.volume = 0.00;
-  noise.volume  = 0.00;
 
   try{ await inside.play(); }catch(e){}
+
   hint.textContent = "« ouvrir »";
   state="entered";
 }
 
-async function beginPlay(){
+function beginPlay(){
   hint.style.display="none";
   start.style.display="none";
-
-  // start 呼吸停止（进入事件）
   start.classList.remove("breath");
 
   v1.style.display="block";
   v1.currentTime=0;
   v1.play();
+
   state="playing";
 }
 
@@ -194,8 +221,9 @@ v1.onended = ()=>{
   setTimeout(()=> fade(inside, inside.volume, 0.00, 1500), 2500);
 
   // outside：前3秒淡入到0.55
+  outside.currentTime = 0;
   outside.volume = 0.00;
-  outside.play().catch(()=>{});
+  outside.play().catch(()=>{ setTimeout(()=> outside.play().catch(()=>{}), 200); });
   fade(outside, 0.00, 0.55, 3000);
 };
 
@@ -209,8 +237,9 @@ v2.onended = ()=>{
   // outside 抬强 + noise 淡入
   fade(outside, outside.volume, 0.78, 2000);
 
+  noise.currentTime = 0;
   noise.volume=0.00;
-  noise.play().catch(()=>{});
+  noise.play().catch(()=>{ setTimeout(()=> noise.play().catch(()=>{}), 200); });
   fade(noise, 0.00, 0.25, 2000);
 
   // outside 轻微不稳定呼吸（更紧张）
@@ -228,28 +257,22 @@ v3.onended = ()=>{
   try{ v3.pause(); }catch(e){}
   state="ended";
 
-  // 音频可选择不停止：如果你想“停在外部”，保留outside+noise
-  // 我建议：保留一会儿，让暗化吞没感知（更艺术）
-  // 如果你想立即静音，把下面三行取消注释：
-  // stopAllAudio();
-
-  // 慢慢暗化到一个基础黑幕（比如 0.35），再呼吸
   endveil.style.setProperty("--veilBase", "0.35");
   endveil.style.opacity = "0.35";
-  setTimeout(()=> endveil.classList.add("breathe"), 12000); // 暗化完成后再开始呼吸
+  setTimeout(()=> endveil.classList.add("breathe"), 12000);
 
   hint.textContent = "« recommencer »";
   hint.style.display="block";
 };
 
-// 点击控制
+// 点击控制（保持你原本的交互）
 document.body.addEventListener("click", ()=>{
   if(state==="ready"){
-    enterWithInside();     // 第一次：进入（inside响）
+    enterWithInside();
   }else if(state==="entered"){
-    beginPlay();           // 第二次：打开（事件发生）
+    beginPlay();
   }else if(state==="playing" || state==="ended"){
-    startIntro();          // 播放中/结束：重来
+    startIntro();
   }
 });
 
