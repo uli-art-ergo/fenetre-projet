@@ -2,28 +2,32 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Perception</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fenêtre — perception</title>
 <style>
-  body{margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;}
+  body{
+    margin:0;background:#000;
+    display:flex;justify-content:center;align-items:center;
+    height:100vh;overflow:hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
   img,video{max-width:100vw;max-height:100vh;display:block;}
 
-  /* 黑屏开场 */
+  /* 1) 黑屏短呼吸开场 */
   #black{
-    position:fixed;inset:0;background:#000;opacity:1;
-    transition:opacity 1.2s ease;
-    pointer-events:none;
-    z-index:10;
+    position:fixed;inset:0;background:#000;
+    opacity:1;transition:opacity 1.2s ease;
+    pointer-events:none;z-index:10;
   }
 
-  /* start 静帧：淡入 + 轻呼吸 */
+  /* start 静帧：淡入 + 极轻呼吸 */
   #start{
     display:none;cursor:pointer;
     opacity:0;transition:opacity 1.2s ease;
     z-index:1;
   }
   #start.breath{
-    animation: startBreath 6.5s ease-in-out infinite;
-    /* breath 很轻：别太明显 */
+    animation:startBreath 6.5s ease-in-out infinite;
   }
   @keyframes startBreath{
     0%   { filter: brightness(1.00) contrast(1.00) saturate(1.00); }
@@ -31,30 +35,31 @@
     100% { filter: brightness(1.00) contrast(1.00) saturate(1.00); }
   }
 
-  /* 视频 */
+  /* 视频段 */
   #v1,#v2,#v3{display:none;z-index:2;}
 
-  /* 结尾暗化层：慢慢变暗 + 极轻呼吸 */
+  /* end 暗化层：慢慢变暗 + 极轻呼吸 */
   #endveil{
     position:fixed;inset:0;background:#000;
     opacity:0;pointer-events:none;
-    transition:opacity 12s ease; /* 慢慢暗化：12秒 */
+    transition:opacity 12s ease;
     z-index:20;
+    --veilBase: 0.35; /* 结尾暗化强度：0.25更轻，0.45更压迫 */
   }
   #endveil.breathe{
-    animation: endBreath 7.5s ease-in-out infinite;
+    animation:endBreath 7.5s ease-in-out infinite;
   }
   @keyframes endBreath{
-    0%   { opacity: var(--veilBase, 0.35); }
-    50%  { opacity: calc(var(--veilBase, 0.35) + 0.05); }
-    100% { opacity: var(--veilBase, 0.35); }
+    0%   { opacity: var(--veilBase); }
+    50%  { opacity: calc(var(--veilBase) + 0.05); }
+    100% { opacity: var(--veilBase); }
   }
 
-  /* 提示文字（法语） */
+  /* 法语提示 */
   #hint{
     position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
     color:rgba(255,255,255,.55);
-    font: 14px/1 system-ui;
+    font:14px/1 system-ui;
     letter-spacing:.08em;
     user-select:none;
     display:none;
@@ -80,28 +85,29 @@
 <audio id="noise"  src="noise.mp3"  loop></audio>
 
 <script>
-const black=document.getElementById("black");
-const endveil=document.getElementById("endveil");
-const start=document.getElementById("start");
-const hint=document.getElementById("hint");
+const black   = document.getElementById("black");
+const endveil = document.getElementById("endveil");
+const start   = document.getElementById("start");
+const hint    = document.getElementById("hint");
 
-const v1=document.getElementById("v1");
-const v2=document.getElementById("v2");
-const v3=document.getElementById("v3");
+const v1 = document.getElementById("v1");
+const v2 = document.getElementById("v2");
+const v3 = document.getElementById("v3");
 
-const inside=document.getElementById("inside");
-const outside=document.getElementById("outside");
-const noise=document.getElementById("noise");
+const inside = document.getElementById("inside");
+const outside= document.getElementById("outside");
+const noise  = document.getElementById("noise");
 
-let state = "intro"; // intro | ready | entered | playing | ended
+let state = "intro";     // intro | ready | entered | playing | ended
+let audioUnlocked = false;
 
 function clamp(v){ return Math.max(0, Math.min(1, v)); }
 function fade(a,from,to,ms){
-  let i=0,steps=60;
-  a.volume=clamp(from);
-  const t=setInterval(()=>{
+  let i=0, steps=60;
+  a.volume = clamp(from);
+  const t = setInterval(()=>{
     i++;
-    a.volume=clamp(from+(to-from)*(i/steps));
+    a.volume = clamp(from + (to-from)*(i/steps));
     if(i>=steps) clearInterval(t);
   }, ms/steps);
 }
@@ -114,30 +120,60 @@ function hideAllVisual(){
 }
 
 function resetVideos(){
-  [v1,v2,v3].forEach(v=>{ try{v.pause();}catch(e){} v.currentTime=0; });
+  [v1,v2,v3].forEach(v=>{
+    try{ v.pause(); }catch(e){}
+    v.currentTime = 0;
+  });
 }
 
 function stopAllAudio(){
-  [inside,outside,noise].forEach(a=>{ try{a.pause();}catch(e){} a.currentTime=0; });
+  [inside,outside,noise].forEach(a=>{
+    try{ a.pause(); }catch(e){}
+    a.currentTime = 0;
+  });
+}
+
+/**
+ * ✅ 关键：手机音频解锁
+ * iOS/微信/很多移动浏览器需要在“用户交互事件”里触发 play() 才允许后续播放。
+ * 这里做一次“触发-暂停”，让之后的淡入淡出都能正常工作。
+ */
+async function unlockAudioOnce(){
+  if(audioUnlocked) return;
+  audioUnlocked = true;
+
+  // 先把音量设为0，避免突然响
+  inside.volume = 0.0;
+  outside.volume= 0.0;
+  noise.volume  = 0.0;
+
+  try{ await inside.play(); }catch(e){}
+  try{ await outside.play(); }catch(e){}
+  try{ await noise.play(); }catch(e){}
+
+  // 立刻暂停外部两条，只保留inside待用
+  try{ outside.pause(); }catch(e){}
+  try{ noise.pause(); }catch(e){}
+
+  // inside 保持在可播放状态（不暂停），后面我们会把它淡入
 }
 
 function showStart(){
   hideAllVisual();
+
   // 取消结尾暗化层
   endveil.classList.remove("breathe");
   endveil.style.opacity = "0";
-  endveil.style.setProperty("--veilBase", "0.35");
 
-  start.style.display="block";
-  start.style.opacity="0";
-  // 开始呼吸动画
+  start.style.display = "block";
+  start.style.opacity = "0";
   start.classList.add("breath");
 
-  hint.style.display="block";
-  hint.textContent = "« entrer »";
+  hint.style.display  = "block";
+  hint.textContent    = "« entrer »";
 
-  setTimeout(()=> start.style.opacity="1", 30);
-  state="ready";
+  setTimeout(()=> start.style.opacity = "1", 30);
+  state = "ready";
 }
 
 function startIntro(){
@@ -145,116 +181,111 @@ function startIntro(){
   resetVideos();
   stopAllAudio();
 
-  // 重置 start 呼吸（避免残留）
+  // 重置呼吸
   start.classList.remove("breath");
 
-  // 黑屏短开场：1.2s
-  black.style.transition="none";
-  black.style.opacity="1";
+  // 黑屏短开场（1.2s）
+  black.style.transition = "none";
+  black.style.opacity = "1";
   void black.offsetWidth;
-  black.style.transition="opacity 1.2s ease";
-  state="intro";
+  black.style.transition = "opacity 1.2s ease";
+  state = "intro";
 
-  setTimeout(()=>{ black.style.opacity="0"; }, 150);
+  setTimeout(()=>{ black.style.opacity = "0"; }, 150);
   setTimeout(()=>{ showStart(); }, 1200);
 }
 
 async function enterWithInside(){
-  // 第一次点击：解锁音频 + inside 开始，但画面仍是 start
-  inside.volume = 0.45;
-  outside.volume = 0.00;
-  noise.volume  = 0.00;
+  // 第一次点击：解锁音频 + inside开始（但画面仍停在start）
+  await unlockAudioOnce();
 
-  try{ await inside.play(); }catch(e){}
+  // inside 从0淡入到0.45（更“像呼吸进入空间”）
+  inside.volume = 0.0;
+  fade(inside, 0.0, 0.45, 1200);
+
   hint.textContent = "« ouvrir »";
-  state="entered";
+  state = "entered";
 }
 
 async function beginPlay(){
-  hint.style.display="none";
-  start.style.display="none";
-
-  // start 呼吸停止（进入事件）
+  hint.style.display = "none";
+  start.style.display = "none";
   start.classList.remove("breath");
 
-  v1.style.display="block";
-  v1.currentTime=0;
+  v1.style.display = "block";
+  v1.currentTime = 0;
   v1.play();
-  state="playing";
+  state = "playing";
 }
 
-// v1 -> v2
+/* v1 -> v2 */
 v1.onended = ()=>{
   v1.style.display="none";
   v2.style.display="block";
   v2.currentTime=0;
   v2.play();
 
-  // part2：2.5秒开始 inside 淡出（1.5秒完成）
+  // part2：inside在2.5s开始淡出，1.5s完成
   setTimeout(()=> fade(inside, inside.volume, 0.00, 1500), 2500);
 
-  // outside：前3秒淡入到0.55
-  outside.volume = 0.00;
+  // outside：0 -> 0.55（前3s淡入）
+  outside.currentTime = 0;
+  outside.volume = 0.0;
   outside.play().catch(()=>{});
-  fade(outside, 0.00, 0.55, 3000);
+  fade(outside, 0.0, 0.55, 3000);
 };
 
-// v2 -> v3
+/* v2 -> v3 */
 v2.onended = ()=>{
   v2.style.display="none";
   v3.style.display="block";
   v3.currentTime=0;
   v3.play();
 
-  // outside 抬强 + noise 淡入
+  // outside 抬强：0.55 -> 0.78（2s）
   fade(outside, outside.volume, 0.78, 2000);
 
-  noise.volume=0.00;
+  // noise 淡入：0 -> 0.25（2s）
+  noise.currentTime = 0;
+  noise.volume = 0.0;
   noise.play().catch(()=>{});
-  fade(noise, 0.00, 0.25, 2000);
+  fade(noise, 0.0, 0.25, 2000);
 
-  // outside 轻微不稳定呼吸（更紧张）
+  // outside 轻微不稳定（更紧张的呼吸）
   let phase=0;
-  const wobble=setInterval(()=>{
+  const wobble = setInterval(()=>{
     if(state!=="playing" || v3.style.display==="none"){ clearInterval(wobble); return; }
-    phase+=0.11;
+    phase += 0.11;
     const base=0.78, amp=0.06;
     outside.volume = clamp(base + Math.sin(phase)*amp + Math.sin(phase*0.43)*(amp*0.6));
   }, 120);
 };
 
-// 结尾：停住 + 慢慢暗化 + 轻呼吸
+/* 结尾 */
 v3.onended = ()=>{
   try{ v3.pause(); }catch(e){}
-  state="ended";
+  state = "ended";
 
-  // 音频可选择不停止：如果你想“停在外部”，保留outside+noise
-  // 我建议：保留一会儿，让暗化吞没感知（更艺术）
-  // 如果你想立即静音，把下面三行取消注释：
-  // stopAllAudio();
-
-  // 慢慢暗化到一个基础黑幕（比如 0.35），再呼吸
-  endveil.style.setProperty("--veilBase", "0.35");
-  endveil.style.opacity = "0.35";
-  setTimeout(()=> endveil.classList.add("breathe"), 12000); // 暗化完成后再开始呼吸
+  // 结尾慢暗化 + 呼吸（像感知退潮）
+  endveil.style.opacity = getComputedStyle(endveil).getPropertyValue("--veilBase") || "0.35";
+  setTimeout(()=> endveil.classList.add("breathe"), 12000);
 
   hint.textContent = "« recommencer »";
-  hint.style.display="block";
+  hint.style.display = "block";
 };
 
-// 点击控制
+/* 点击控制：ready->entered->playing；playing/ended->重来 */
 document.body.addEventListener("click", ()=>{
   if(state==="ready"){
-    enterWithInside();     // 第一次：进入（inside响）
+    enterWithInside();
   }else if(state==="entered"){
-    beginPlay();           // 第二次：打开（事件发生）
+    beginPlay();
   }else if(state==="playing" || state==="ended"){
-    startIntro();          // 播放中/结束：重来
+    startIntro();
   }
 });
 
 startIntro();
 </script>
-
 </body>
 </html>
