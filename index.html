@@ -178,7 +178,16 @@ v1.onended=()=>{
   v2.play().catch(()=>{});
 
   // part2：2.5秒开始 inside 淡出（1.5秒）
-  setTimeout(()=> fade(inside, inside.volume, 0.00, 1500), 2500);
+  setTimeout(()=>{
+  // 先淡出
+  fade(inside, inside.volume, 0.00, 1500);
+  // 再在淡出完成后彻底停止（防止loop残留）
+  setTimeout(()=>{
+    try{ inside.pause(); }catch(e){}
+    inside.currentTime = 0;
+    inside.volume = 0.00;
+  }, 1600);
+}, 2500);
 
   // outside：前3秒淡入到0.55
   outside.currentTime=0;
